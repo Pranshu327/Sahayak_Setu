@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SAHAYAK SETU : AI-Powered Mental Health Monitoring & Early Intervention</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={darkMode:'class',theme:{extend:{colors:{navy:{950:'#070d24',900:'#0a1230',800:'#0f1b45',700:'#16265e'}}}}}</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+@keyframes pulseR{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.6)}50%{box-shadow:0 0 0 8px rgba(220,38,38,0)}}
+.pr{animation:pulseR 1.6s infinite}
+@keyframes slide{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+.sl{animation:slide .25s ease}
+::-webkit-scrollbar{height:6px;width:6px}::-webkit-scrollbar-thumb{background:#64748b55;border-radius:9px}
+</style>
+</head>
+<body class="bg-slate-100 dark:bg-slate-950 text-slate-800 dark:text-slate-200 min-h-screen">
+
+<!-- HEADER -->
+<header class="bg-navy-900 text-white border-b-4 border-red-600 sticky top-0 z-40">
+  <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+    
+    <!-- Left: Branding -->
+    <div class="flex items-center gap-2.5 mr-2">
+      <div class="w-9 h-9 rounded-lg bg-red-600 grid place-items-center">
+        <i data-lucide="heart-pulse" class="w-5 h-5"></i>
+      </div>
+      <div class="leading-tight">
+        <div class="font-bold text-sm">SAHAYAK SETU</div>
+        <div class="text-[11px] text-slate-300">AI Dynamic Mental Health Monitoring & Distress Prediction</div>
+      </div>
+    </div>
+
+    <!-- Right Controls: Search, Dropdown, and Theme Toggle -->
+    <div class="flex items-center gap-3 ml-auto">
+      <div class="relative w-48 sm:w-64">
+        <i data-lucide="search" class="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
+        <input id="q" oninput="S.q=this.value;if(S.tab!=='queue')go('queue');else render()" placeholder="Search case ID, district, category…" class="w-full bg-navy-800 border border-navy-700 rounded-lg pl-9 pr-3 py-2 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500">
+      </div>
+
+      <select id="role" onchange="S.role=this.value;ensureSel();render()" class="bg-navy-800 border border-navy-700 rounded-lg px-3 py-2 text-sm focus:outline-none">
+        <option value="district">District Level · Lucknow</option>
+        <option value="state">State Level · Uttar Pradesh</option>
+        <option value="national" selected>National Level · NHAA</option>
+        <option value="counsellor">Counsellor · Dr. R. Mehta</option>
+      </select>
+
+      <button onclick="document.documentElement.classList.toggle('dark');render()" class="p-2 rounded-lg bg-navy-800 hover:bg-navy-700" title="Toggle theme">
+        <i data-lucide="sun-moon" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+  </div>
+</header>
+
+<div class="md:flex">
+  <aside class="md:w-60 md:min-h-[calc(100vh-64px)] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 md:sticky md:top-[64px] md:self-start">
+    <nav id="nav" class="flex md:flex-col gap-1 p-2 overflow-x-auto"></nav>
+    <div class="hidden md:block p-3 text-[11px] text-slate-500 border-t border-slate-200 dark:border-slate-800 leading-relaxed">
+      <div id="scope" class="font-semibold text-slate-600 dark:text-slate-300 mb-1"></div>
+      Prototype · synthetic, pseudonymised data. AI output is decision-support only; every action needs human review.
+    </div>
+  </aside>
+  <main id="main" class="flex-1 p-4 md:p-6 min-w-0"></main>
+</div>
+
+<div id="modal"></div><div id="alert"></div>
+<div id="toasts" class="fixed bottom-4 right-4 z-[70] space-y-2"></div>
+
+<script>
+/* ---------- helpers & data ---------- */
+const $=s=>document.querySelector(s);
+const CL='bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl';
+const W={nlp:.4,voice:.35,lat:.25};
+const clamp=(x,a=0,b=100)=>Math.max(a,Math.min(b,Math.round(x)));
+const sc=v=>Math.round(v.nlp*W.nlp+v.voice*W.voice+v.lat*W.lat);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tier=s=>s>=75?{n:'Critical',c:'#dc2626',t:'text-red-600 dark:text-red-400',b:'bg-red-600/10 border-red-500/40'}:s>=50?{n:'Elevated',c:'#f59e0b',t:'text-amber-600 dark:text-amber-400',b:'bg-amber-500/10 border-amber-500/40'}:{n:'Stable',c:'#10b981',t:'text-emerald-600 dark:text-emerald-400',b:'bg-emerald-500/10 border-emerald-500/40'};
+const pill=s=>{const t=tier(s);return `<span class="px-2 py-0.5 rounded-md text-xs font-bold border ${t.b} ${t.t}">${s} · ${t.n}</span>`};
+const DATES=['Aug 17','Aug 24','Aug 31','Sep 7','Sep 14','Sep 21','Sep 28'];
+const ROLES={district:'District Officer · Lucknow',state:'State Nodal Officer · UP',national:'National Level · NHAA',counsellor:'Counsellor · Dr. R. Mehta'};
+const IV=[
+ {k:'Witness Protection',i:'shield-alert',d:'Police security cover & safe relocation'},
+ {k:'Medical Aid',i:'stethoscope',d:'Emergency psychiatric / medical response'},
+ {k:'Counselling',i:'heart-handshake',d:'Priority tele-counselling session'},
+ {k:'Financial Compensation',i:'indian-rupee',d:'Interim relief release under PoA Act'}];
+const V=[
+ {id:'0231',name:'A. K.',age:34,dist:'Lucknow',st:'UP',cat:'Witness intimidation',co:'Dr. R. Mehta',hearing:'Court hearing · 04 Oct 2026',nlp:85,voice:92,lat:78,trend:[48,52,60,63,75,82,0],ms:{1:'FIR registered',4:'Threat reported',6:'Hearing notice served'}},
+ {id:'0198',name:'S. D.',age:41,dist:'Muzaffarnagar',st:'UP',cat:'Social boycott / harassment',co:'Dr. S. Iyer',hearing:'Court hearing · 12 Oct 2026',nlp:78,voice:80,lat:70,trend:[55,58,62,66,70,74,0],ms:{2:'Charge sheet filed',5:'Threat reported'}},
+ {id:'0307',name:'R. P.',age:29,dist:'Nagpur',st:'MH',cat:'Physical assault',co:'Dr. R. Mehta',hearing:'Bail hearing · 30 Sep 2026',nlp:66,voice:60,lat:72,trend:[40,44,47,55,58,62,0],ms:{3:'Accused bail plea',6:'Hearing date set'}},
+ {id:'0412',name:'M. Y.',age:52,dist:'Patna',st:'BR',cat:'Property destruction',co:'Dr. S. Iyer',hearing:'Compensation review · 20 Oct 2026',nlp:58,voice:64,lat:50,trend:[60,59,57,55,56,57,0],ms:{1:'Relief claim filed'}},
+ {id:'0155',name:'K. L.',age:37,dist:'Lucknow',st:'UP',cat:'Caste-based abuse',co:'Dr. R. Mehta',hearing:'Court hearing · 02 Nov 2026',nlp:44,voice:40,lat:38,trend:[52,50,48,46,45,43,0],ms:{2:'Counselling started'}},
+ {id:'0529',name:'T. B.',age:26,dist:'Pune',st:'MH',cat:'Sexual violence survivor',co:'Dr. A. Rao',hearing:'Trial · 15 Nov 2026',nlp:30,voice:28,lat:25,trend:[45,40,38,35,33,30,0],ms:{1:'Medical aid delivered'}},
+ {id:'0266',name:'H. N.',age:45,dist:'Agra',st:'UP',cat:'Forced displacement',co:'Dr. A. Rao',hearing:'Court hearing · 07 Oct 2026',nlp:72,voice:70,lat:82,trend:[42,45,50,58,63,69,0],ms:{3:'Eviction notice',5:'Witness summons'}},
+ {id:'0093',name:'D. S.',age:31,dist:'Jaipur',st:'RJ',cat:'Threat & stalking',co:'Dr. R. Mehta',hearing:'No hearing scheduled',nlp:20,voice:22,lat:18,trend:[30,28,26,24,22,21,0],ms:{0:'Case registered'}}];
+const DIST=[['Lucknow','UP',0],['Muzaffarnagar','UP',0],['Agra','UP',0],['Kanpur','UP',44],['Nagpur','MH',0],['Pune','MH',0],['Patna','BR',0],['Gaya','BR',40],['Jaipur','RJ',0],['Ajmer','RJ',18],['Bhopal','MP',31],['Ranchi','JH',37]];
+let AUD=[
+ {t:'28 Sep, 09:12',actor:'State Nodal Officer · UP',vid:'0198',act:'Counselling',pr:'P2',st:'Completed'},
+ {t:'27 Sep, 18:40',actor:'District Officer · Lucknow',vid:'0231',act:'Witness Protection',pr:'P1',st:'Dispatched'},
+ {t:'27 Sep, 11:05',actor:'Counsellor · Dr. R. Mehta',vid:'0307',act:'Medical Aid',pr:'P2',st:'Completed'},
+ {t:'26 Sep, 15:22',actor:'National Level · NHAA',vid:'0412',act:'Financial Compensation',pr:'P3',st:'Pending approval'}
+].map(e=>({...e,hash:hash(e.t+e.vid+e.act)}));
+function hash(s){let h=5381;for(const c of s)h=(h*33)^c.charCodeAt(0);return (h>>>0).toString(16).padStart(8,'0')}
+const S={tab:'overview',role:'national',f:'All',q:'',sel:'0231'};
+let charts={},callT=null;
+Chart.defaults.color='#94a3b8';Chart.defaults.borderColor='rgba(148,163,184,.15)';
+const upd=v=>{v.trend[6]=sc(v)};V.forEach(upd);
+const byId=id=>V.find(v=>v.id===id);
+const scoped=()=>V.filter(v=>({district:v.dist==='Lucknow',state:v.st==='UP',national:true,counsellor:v.co==='Dr. R. Mehta'})[S.role]);
+const ensureSel=()=>{const L=scoped();if(!L.find(v=>v.id===S.sel))S.sel=L[0].id};
+const pred=v=>clamp(sc(v)+(v.trend[6]-v.trend[5])*1.5);
+const now=()=>new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+const mk=(id,cfg)=>{if(charts[id])charts[id].destroy();charts[id]=new Chart($('#'+id),cfg);return charts[id]};
+const card=(title,icon,body,cls='')=>`<section class="${CL} p-4 ${cls}"><h3 class="flex items-center gap-2 text-sm font-bold mb-3"><i data-lucide="${icon}" class="w-4 h-4 text-sky-500"></i>${title}</h3>${body}</section>`;
+const gauge=(s,sz=190)=>{const t=tier(s),L=157.08;return `<svg viewBox="0 0 120 72" width="${sz}" class="mx-auto"><path d="M10 62A50 50 0 0 1 110 62" fill="none" stroke="currentColor" class="text-slate-200 dark:text-slate-800" stroke-width="10" stroke-linecap="round"/><path d="M10 62A50 50 0 0 1 110 62" fill="none" stroke="${t.c}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${s/100*L} ${L}"/><text x="60" y="52" text-anchor="middle" font-size="26" font-weight="800" fill="${t.c}">${s}</text><text x="60" y="67" text-anchor="middle" font-size="7" fill="#94a3b8">${t.n.toUpperCase()} · /100</text></svg>`};
+const bar=(l,v)=>`<div class="mb-2"><div class="flex justify-between text-xs mb-1"><span>${l}</span><b style="color:${tier(v).c}">${v}</b></div><div class="h-2 rounded-full bg-slate-200 dark:bg-slate-800"><div class="h-2 rounded-full transition-all" style="width:${v}%;background:${tier(v).c}"></div></div></div>`;
+const rec=v=>{const r=[];if(sc(v)>=75&&Object.values(v.ms).some(m=>/threat/i.test(m)))r.push('Witness Protection');if(v.voice>=70)r.push('Medical Aid');if(v.nlp>=55)r.push('Counselling');if(v.lat>=60)r.push('Financial Compensation');return r};
+function toast(m,k='ok'){const c={ok:'bg-emerald-600',warn:'bg-amber-500',bad:'bg-red-600'}[k];const d=document.createElement('div');d.className=`sl ${c} text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-xs`;d.textContent=m;$('#toasts').append(d);setTimeout(()=>d.remove(),3800)}
+const log=(vid,act,pr,st,actor=ROLES[S.role])=>{const t=now();AUD.unshift({t,actor,vid,act,pr,st,hash:hash(t+vid+act+Math.random())})};
+
+/* ---------- XAI ---------- */
+function xai(v){
+ const o=[],c={nlp:v.nlp*W.nlp,voice:v.voice*W.voice,lat:v.lat*W.lat};
+ if(v.nlp>=60)o.push(['message-square-warning',`<b>NLP sentiment:</b> fear / helplessness lexicon and strongly negative polarity across recent chats (+${c.nlp.toFixed(0)} pts)`]);
+ if(v.voice>=60)o.push(['audio-lines',`<b>Voice emotion:</b> pitch variance, tremor and speech-rate spikes on last IVRS call (+${c.voice.toFixed(0)} pts)`]);
+ if(v.lat>=60)o.push(['timer-off',`<b>Engagement latency:</b> response delays ~${(v.lat/20).toFixed(1)}× personal baseline; skipped check-ins (+${c.lat.toFixed(0)} pts)`]);
+ const ks=Object.keys(v.ms).map(Number),k=Math.max(...ks),d=v.trend[6]-v.trend[Math.max(0,k-1)];
+ o.push(['flag',`<b>Milestone link:</b> score moved ${d>0?'+':''}${d} pts since “${v.ms[k]}” (${DATES[k]})`]);
+ if(!o.some(x=>x[1].includes('NLP'))&&v.nlp<40)o.push(['smile',`<b>Protective factor:</b> positive sentiment, consistent counselling attendance`]);
+ const cf=Math.round(30*W.lat+v.nlp*W.nlp+v.voice*W.voice);
+ o.push(['git-compare',`<b>Counterfactual:</b> if engagement latency normalised, score would be ~${cf}`]);
+ return o;
+}
+
+/* ---------- views ---------- */
+const views={},after={};
+const qrow=v=>{const s=sc(v),t=tier(s),d=v.trend[6]-v.trend[5];return `<div class="${CL} p-3 flex flex-wrap items-center gap-3 border-l-4" style="border-left-color:${t.c}">
+ <div class="flex-1 min-w-[200px]"><div class="flex items-center gap-2"><span class="font-mono text-xs text-slate-500">NHAA/${v.st}/${v.id}</span>${s>=75?'<span class="w-2 h-2 rounded-full bg-red-600 pr"></span><span class="text-[10px] font-bold text-red-500">LIVE</span>':''}</div>
+ <div class="font-semibold text-sm">Victim ${v.name}, ${v.age} · ${v.cat}</div><div class="text-xs text-slate-500">${v.dist}, ${v.st} · ${v.co} · ${v.hearing}</div></div>
+ <div class="text-center"><div>${pill(s)}</div><div class="text-[11px] mt-1 ${d>0?'text-red-500':'text-emerald-500'}">${d>0?'▲':d<0?'▼':'■'} ${Math.abs(d)} wk · 72h→${pred(v)}</div></div>
+ <div class="flex gap-2"><button onclick="go('dossier','${v.id}')" class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">Dossier</button>
+ <button onclick="openDispatch('${v.id}')" class="px-3 py-1.5 text-xs rounded-lg bg-navy-800 text-white hover:bg-navy-700 dark:bg-sky-600 dark:hover:bg-sky-500">Dispatch</button></div></div>`};
+
+views.overview=()=>{
+ const L=scoped(),cr=L.filter(v=>sc(v)>=75).length,avg=Math.round(L.reduce((a,v)=>a+sc(v),0)/L.length),esc_=L.filter(v=>sc(v)<75&&pred(v)>=75).length;
+ const K=[['users','Active Cases',L.length,'text-sky-500'],['siren','Critical Alerts',cr,'text-red-500'],['activity','Avg Distress',avg,'text-amber-500'],['trending-up','Predicted 72h Escalations',esc_,'text-orange-500'],['send','Interventions Logged',AUD.length,'text-emerald-500']];
+ const dl=DIST.filter(d=>S.role==='district'?d[0]==='Lucknow':S.role==='state'?d[1]==='UP':S.role==='counsellor'?L.some(v=>v.dist===d[0]):true);
+ const heat=dl.map(d=>{const vs=L.filter(v=>v.dist===d[0]),r=Math.max(d[2],...vs.map(sc)),t=tier(r);return `<div title="${d[0]}: risk ${r}" class="rounded-lg p-2 text-white text-xs cursor-default" style="background:${t.c}${r<30?'aa':''}"><div class="font-semibold truncate">${d[0]}</div><div class="flex justify-between opacity-90"><span>${d[1]}</span><b>${r}</b></div></div>`}).join('');
+ const top=[...L].sort((a,b)=>sc(b)-sc(a)).slice(0,5).map(qrow).join('');
+ return `<div class="sl space-y-4"><h2 class="text-lg font-bold">Command Center <span class="text-sm font-normal text-slate-500">· ${ROLES[S.role]}</span></h2>
+ <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">${K.map(k=>`<div class="${CL} p-3"><i data-lucide="${k[0]}" class="w-5 h-5 ${k[3]}"></i><div class="text-2xl font-extrabold mt-1">${k[2]}</div><div class="text-[11px] text-slate-500">${k[1]}</div></div>`).join('')}</div>
+ <div class="grid lg:grid-cols-3 gap-4">
+  ${card('Risk Heatmap · District Level','map',`<div class="grid grid-cols-3 gap-2">${heat}</div><div class="flex gap-3 text-[11px] mt-3 text-slate-500"><span><i class="inline-block w-2 h-2 rounded-full bg-red-600"></i> ≥75</span><span><i class="inline-block w-2 h-2 rounded-full bg-amber-500"></i> 50–74</span><span><i class="inline-block w-2 h-2 rounded-full bg-emerald-500"></i> &lt;50</span></div>`)}
+  ${card('Average Distress Trend (Longitudinal)','line-chart','<div class="h-56"><canvas id="cTrend"></canvas></div>','lg:col-span-2')}
+ </div>
+ <div class="grid lg:grid-cols-3 gap-4">
+  ${card('Triage Queue · Highest Priority','list-checks',`<div class="space-y-2">${top}</div>`,'lg:col-span-2')}
+  ${card('Risk Distribution','pie-chart','<div class="h-56"><canvas id="cDist"></canvas></div>')}
+ </div></div>`};
+after.overview=()=>{const L=scoped();
+ mk('cTrend',{type:'line',data:{labels:DATES,datasets:[{label:'Avg distress',data:DATES.map((_,i)=>Math.round(L.reduce((a,v)=>a+v.trend[i],0)/L.length)),borderColor:'#38bdf8',backgroundColor:'#38bdf822',fill:true,tension:.35},{label:'Critical threshold',data:DATES.map(()=>75),borderColor:'#dc2626',borderDash:[5,4],pointRadius:0}]},options:{maintainAspectRatio:false,scales:{y:{min:0,max:100}}}});
+ mk('cDist',{type:'doughnut',data:{labels:['Critical','Elevated','Stable'],datasets:[{data:[L.filter(v=>sc(v)>=75).length,L.filter(v=>sc(v)>=50&&sc(v)<75).length,L.filter(v=>sc(v)<50).length],backgroundColor:['#dc2626','#f59e0b','#10b981'],borderWidth:0}]},options:{maintainAspectRatio:false,cutout:'65%'}})};
+
+const qlist=()=>{const q=S.q.toLowerCase();const L=scoped().filter(v=>(S.f==='All'||tier(sc(v)).n===S.f)&&(!q||(v.id+v.name+v.dist+v.cat+v.st).toLowerCase().includes(q))).sort((a,b)=>sc(b)-sc(a));return L.length?L.map(qrow).join(''):'<div class="text-center text-slate-500 py-10">No cases match the current filters.</div>'};
+views.queue=()=>`<div class="sl space-y-4"><div class="flex flex-wrap items-center gap-2"><h2 class="text-lg font-bold mr-3">High-Risk Victim Queue</h2>
+ ${['All','Critical','Elevated','Stable'].map(f=>`<button onclick="S.f='${f}';render()" class="px-3 py-1.5 rounded-full text-xs font-semibold border ${S.f===f?'bg-navy-800 text-white border-navy-800 dark:bg-sky-600 dark:border-sky-600':'border-slate-300 dark:border-slate-700'}">${f}${f!=='All'?` (${scoped().filter(v=>tier(sc(v)).n===f).length})`:''}</button>`).join('')}
+ <span class="ml-auto text-xs text-slate-500 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 pr" style="animation-name:none"></span>Real-time stream · updates every 5s</span></div>
+ ${S.q?`<div class="text-xs text-slate-500">Search: “${esc(S.q)}”</div>`:''}<div id="qlist" class="space-y-2">${qlist()}</div></div>`;
+
+views.dossier=()=>{
+ const L=scoped(),v=byId(S.sel),s=sc(v),t=tier(s),r=rec(v);
+ return `<div class="sl space-y-4">
+ <div class="flex flex-wrap items-center gap-3"><h2 class="text-lg font-bold">Victim Dossier & Dynamic Distress Score</h2>
+  <select onchange="S.sel=this.value;render()" class="ml-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-sm">${L.map(x=>`<option value="${x.id}" ${x.id===S.sel?'selected':''}>#${x.id} · ${x.name} (${sc(x)})</option>`).join('')}</select></div>
+ <div class="grid lg:grid-cols-3 gap-4">
+  ${card('Case Profile','id-card',`<div class="text-sm space-y-1.5"><div class="font-mono text-xs text-slate-500">NHAA/${v.st}/${v.id}</div><div class="font-semibold text-base">Victim ${v.name},${v.age}</div>
+   <div><span class="text-slate-500">Category:</span> ${v.cat}</div><div><span class="text-slate-500">Location:</span> ${v.dist},${v.st}</div><div><span class="text-slate-500">Counsellor:</span> ${v.co}</div>
+   <div class="flex items-center gap-2 text-amber-600 dark:text-amber-400"><i data-lucide="gavel" class="w-4 h-4"></i>${v.hearing}</div>
+   <div class="text-[11px] text-slate-500 pt-2 border-t border-slate-200 dark:border-slate-800">Identity pseudonymised · consent on file (DPDP §6) · access is role-logged</div></div>`)}
+  ${card('Dynamic Distress Score','gauge',`${gauge(s)}<div class="text-center text-xs text-slate-500 -mt-1">72h forecast: <b style="color:${tier(pred(v)).c}">${pred(v)}</b> · model confidence ${Math.min(96,78+Math.round(v.nlp/10)+7)}%</div>`)}
+  ${card('Multimodal AI Breakdown','layers',`<div class="h-28"><canvas id="cMod"></canvas></div><div class="text-[11px] text-slate-500 mt-2">Weights · NLP ${W.nlp*100}% · Voice ${W.voice*100}\% · Latency ${W.lat*100}%</div>`)}
+ </div>
+ ${card('Score Trajectory Linked to Case Milestones','route',`<div class="h-64"><canvas id="cTraj"></canvas></div><div class="flex flex-wrap gap-2 mt-3">${Object.entries(v.ms).map(([i,m])=>`<span class="text-xs px-2 py-1 rounded-md bg-sky-500/10 border border-sky-500/30 text-sky-600 dark:text-sky-300">◆ ${DATES[i]} · ${m}</span>`).join('')}<span class="text-xs px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-300">⚖ ${v.hearing}</span></div>`)}
+ <div class="grid lg:grid-cols-2 gap-4">
+  <section class="rounded-xl p-4 border ${t.b}"><h3 class="flex items-center gap-2 text-sm font-bold mb-3"><i data-lucide="brain-circuit" class="w-4 h-4 ${t.t}"></i>XAI Insight · Why is the score ${s}?</h3>
+   <ul class="space-y-2 text-sm">${xai(v).map(x=>`<li class="flex gap-2"><i data-lucide="${x[0]}" class="w-4 h-4 mt-0.5 shrink-0 text-slate-500"></i><span>${x[1]}</span></li>`).join('')}</ul></section>
+  ${card('Smart Intervention Matrix','crosshair',`<div class="grid sm:grid-cols-2 gap-2">${IV.map(i=>`<button onclick="openDispatch('${v.id}','${i.k}')" class="text-left p-3 rounded-lg border ${r.includes(i.k)?'border-red-500/60 bg-red-500/5':'border-slate-200 dark:border-slate-700'} hover:border-sky-500 transition"><div class="flex items-center gap-2 font-semibold text-sm"><i data-lucide="${i.i}" class="w-4 h-4 text-sky-500"></i>${i.k}</div><div class="text-[11px] text-slate-500 mt-1">${i.d}</div>${r.includes(i.k)?'<span class="inline-block mt-1.5 text-[10px] font-bold text-red-500">● AI RECOMMENDED</span>':''}</button>`).join('')}</div>`)}
+ </div></div>`};
+after.dossier=()=>{const v=byId(S.sel),ms=v.ms;
+ mk('cTraj',{type:'line',data:{labels:DATES,datasets:[{label:'Distress score',data:v.trend,borderColor:tier(sc(v)).c,backgroundColor:tier(sc(v)).c+'22',fill:true,tension:.3,pointRadius:v.trend.map((_,i)=>ms[i]!==undefined||i===6?7:3),pointStyle:v.trend.map((_,i)=>ms[i]!==undefined?'rectRot':'circle')},{label:'Critical (75)',data:DATES.map(()=>75),borderColor:'#dc2626',borderDash:[5,4],pointRadius:0},{label:'Warning (50)',data:DATES.map(()=>50),borderColor:'#f59e0b',borderDash:[5,4],pointRadius:0}]},options:{maintainAspectRatio:false,scales:{y:{min:0,max:100}},plugins:{tooltip:{callbacks:{afterLabel:c=>c.datasetIndex===0&&ms[c.dataIndex]?'◆ '+ms[c.dataIndex]:''}}}}});
+ mk('cMod',{type:'bar',data:{labels:['NLP','Voice','Latency'],datasets:[{data:[v.nlp,v.voice,v.lat],backgroundColor:[v.nlp,v.voice,v.lat].map(x=>tier(x).c),borderRadius:4}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{min:0,max:100}}}})};
+
+views.dispatch=()=>{const cnt=k=>AUD.filter(a=>a.act===k).length;
+ return `<div class="sl space-y-4"><div class="flex items-center"><h2 class="text-lg font-bold">Intervention Dispatch & Action Audit Trail</h2><button onclick="openDispatch(S.sel)" class="ml-auto px-3 py-2 rounded-lg text-sm bg-red-600 text-white hover:bg-red-500 flex items-center gap-1"><i data-lucide="send" class="w-4 h-4"></i>New Dispatch</button></div>
+ <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">${IV.map(i=>`<button onclick="openDispatch(S.sel,'${i.k}')" class="${CL} p-3 text-left hover:border-sky-500"><i data-lucide="${i.i}" class="w-5 h-5 text-sky-500"></i><div class="font-semibold text-sm mt-1">${i.k}</div><div class="text-[11px] text-slate-500">${cnt(i.k)} logged</div></button>`).join('')}</div>
+ ${card('Tamper-evident Audit Trail','scroll-text',`<div class="overflow-x-auto"><table class="w-full text-xs min-w-[720px]"><thead class="text-left text-slate-500"><tr><th class="pb-2">Time</th><th>Actor</th><th>Case</th><th>Action</th><th>Priority</th><th>Status</th><th>Hash</th></tr></thead><tbody>
+ ${AUD.map(a=>`<tr class="border-t border-slate-200 dark:border-slate-800"><td class="py-2">${a.t}</td><td>${esc(a.actor)}</td><td class="font-mono">#${a.vid}</td><td class="font-semibold">${esc(a.act)}</td><td><span class="px-1.5 py-0.5 rounded ${a.pr==='P1'?'bg-red-600/15 text-red-500':a.pr==='P2'?'bg-amber-500/15 text-amber-500':'bg-emerald-500/15 text-emerald-500'}">${a.pr}</span></td><td>${a.st}</td><td class="font-mono text-slate-500">${a.hash}</td></tr>`).join('')}</tbody></table></div>`)}</div>`};
+
+views.sim=()=>{const L=scoped();return `<div class="sl space-y-4"><h2 class="text-lg font-bold">Interactive AI Simulator</h2>
+ <div class="grid lg:grid-cols-3 gap-4"><div class="lg:col-span-2 space-y-4">
+  ${card('Live IVRS Call Simulation','phone-call',`<div class="flex flex-wrap gap-2 mb-3">
+   <select id="sv" onchange="updLive()" class="bg-transparent border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-sm">${L.map(x=>`<option class="text-slate-900" value="${x.id}" ${x.id===S.sel?'selected':''}>#${x.id} · ${x.name}</option>`).join('')}</select>
+   <select id="ss" class="bg-transparent border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1.5 text-sm"><option class="text-slate-900" value="routine">Routine check-in call</option><option class="text-slate-900" value="escalating">Escalating distress call</option></select>
+   <button onclick="startCall()" class="px-3 py-1.5 rounded-lg text-sm bg-emerald-600 text-white flex items-center gap-1"><i data-lucide="play" class="w-4 h-4"></i>Start call</button>
+   <button onclick="stopCall()" class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-700">Stop</button></div>
+   <div id="tx" class="h-56 overflow-y-auto text-sm space-y-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"><div class="text-slate-500 text-xs">Press “Start call” to stream a transcript with live NLP + voice-emotion scoring.</div></div>`)}
+  ${card('Live Sentiment & Voice Stress','activity','<div class="h-48"><canvas id="cLive"></canvas></div>')}</div>
+ <div class="space-y-4">
+  ${card('Live Score','gauge','<div id="lg"></div><div id="lb" class="mt-2"></div>')}
+  ${card('Chat Sentiment Shift','message-circle',`<input id="sl" type="range" min="-10" max="10" value="0" class="w-full accent-sky-500"><div class="flex justify-between text-[11px] text-slate-500"><span>Negative</span><span>Positive</span></div>
+   <button onclick="chatShift()" class="w-full mt-2 px-3 py-1.5 rounded-lg text-sm bg-navy-800 text-white dark:bg-sky-600">Apply chat message</button>
+   <div class="grid grid-cols-2 gap-2 mt-2"><button onclick="quick('threat')" class="px-2 py-1.5 rounded-lg text-xs border border-amber-500/50 text-amber-600 dark:text-amber-400">Threat mentioned</button><button onclick="quick('silent')" class="px-2 py-1.5 rounded-lg text-xs border border-amber-500/50 text-amber-600 dark:text-amber-400">No reply 24h</button></div>`)}
+  <section class="rounded-xl p-4 border border-red-500/40 bg-red-600/5"><h3 class="flex items-center gap-2 text-sm font-bold mb-2 text-red-500"><i data-lucide="siren" class="w-4 h-4"></i>Sudden Crisis Alert</h3><p class="text-xs text-slate-500 mb-3">Injects an abrupt multimodal spike and fires the escalation workflow.</p>
+   <button onclick="crisis($('#sv').value,'Simulator')" class="w-full px-3 py-2 rounded-lg text-sm font-bold bg-red-600 text-white hover:bg-red-500">Fire crisis alert</button></section>
+ </div></div></div>`};
+after.sim=()=>{mk('cLive',{type:'line',data:{labels:[],datasets:[{label:'Sentiment risk',data:[],borderColor:'#f59e0b',tension:.3},{label:'Voice stress',data:[],borderColor:'#dc2626',tension:.3}]},options:{maintainAspectRatio:false,animation:false,scales:{y:{min:0,max:100}}}});updLive()};
+
+/* ---------- simulator logic ---------- */
+const SCR={
+ routine:[['IVRS','Namaste. This is your weekly wellbeing check-in. How have you been feeling?',0,30],['Victim','I am okay… sleeping a little better this week.',.4,32],['IVRS','Glad to hear it. Have you felt safe at home?',0,30],['Victim','Yes, the police patrol helps. I feel calmer.',.6,25],['IVRS','Your counsellor visit is on Thursday. Anything else?',0,25],['Victim','No, thank you.',.5,22]],
+ escalating:[['IVRS','Namaste. This is your weekly wellbeing check-in. How are you feeling?',0,30],['Victim','Not good. Someone came to my shop again last night.',-.7,78],['IVRS','I am sorry to hear that. Are you safe right now?',0,40],['Victim','They said I should withdraw the case before the hearing. I cannot sleep, I am scared.',-.9,90],['IVRS','I am alerting your counsellor immediately.',0,40],['Victim','Please… send someone. I do not feel safe.',-1,96]]};
+
+function updLive(){const el=$('#lg');if(!el)return;const v=byId($('#sv').value);el.innerHTML=gauge(sc(v),170);$('#lb').innerHTML=bar('NLP sentiment',v.nlp)+bar('Voice emotion',v.voice)+bar('Engagement latency',v.lat)}
+
+function stopCall(){clearInterval(callT);callT=null}
+
+function startCall(){stopCall();const v=byId($('#sv').value),L=SCR[$('#ss').value],lc=charts.cLive;let i=0;$('#tx').innerHTML='';lc.data.labels=[];lc.data.datasets.forEach(d=>d.data=[]);
+ callT=setInterval(()=>{if(i>=L.length){stopCall();if(sc(v)>=75){log(v.id,'AI Auto-escalation','P1','Alert raised','AI Engine');showAlert(v,'IVRS call analysis')}else toast('Call complete · score '+sc(v),'ok');return}
+  const [w,t,s,st]=L[i++],vic=w==='Victim',tag=s<-.3?['Negative','bg-red-500/15 text-red-500']:s>.3?['Positive','bg-emerald-500/15 text-emerald-500']:['Neutral','bg-slate-500/15 text-slate-500'];
+  $('#tx').insertAdjacentHTML('beforeend',`<div class="sl flex gap-2"><span class="text-xs font-bold w-14 shrink-0 ${vic?'text-sky-500':'text-slate-500'}">${w}</span><div class="flex-1">${t}</div>${vic?`<span class="text-[10px] px-1.5 h-fit rounded ${tag[1]}">${tag[0]}</span>`:''}</div>`);$('#tx').scrollTop=1e5;
+  if(vic){v.nlp=clamp(v.nlp-s*10);v.voice=clamp(v.voice+(st-50)/4);v.lat=clamp(v.lat+(s<0?4:-4));upd(v)}
+  lc.data.labels.push(i);lc.data.datasets[0].data.push(Math.round((1-s)*50));lc.data.datasets[1].data.push(st);lc.update();updLive()},1600)}
+
+  function chatShift(){const v=byId($('#sv').value),s=$('#sl').value/10;v.nlp=clamp(v.nlp-s*20);upd(v);updLive();toast(`Chat analysed · NLP now ${v.nlp}`,s<0?'warn':'ok')}
+
+  function quick(k){const v=byId($('#sv').value);if(k==='threat'){v.nlp=clamp(v.nlp+18);v.voice=clamp(v.voice+8)}else v.lat=clamp(v.lat+20);upd(v);updLive();toast(k==='threat'?'Threat keywords detected in chat':'Engagement gap detected','warn');if(sc(v)>=75)showAlert(v,'Chat monitor')}
+
+  function crisis(id,src){const v=byId(id);v.nlp=clamp(v.nlp+30);v.voice=clamp(v.voice+32);v.lat=clamp(v.lat+15);upd(v);log(id,'AI Crisis Alert','P1','Alert raised','AI Engine');updLive();showAlert(v,src)}
+
+  function showAlert(v,src){updBadge();$('#alert').innerHTML=`<div class="fixed inset-0 z-[60] bg-red-950/70 grid place-items-center p-4"><div class="sl bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full overflow-hidden border-2 border-red-600 pr"><div class="bg-red-600 text-white px-5 py-3 flex items-center gap-2 font-bold"><i data-lucide="siren" class="w-5 h-5"></i>CRITICAL DISTRESS ALERT</div><div class="p-5 space-y-3 text-sm"><div class="text-center">${gauge(sc(v),150)}</div><p><b>Case #${v.id}</b> (${v.name}, ${v.dist}) crossed the critical threshold. Source: <b>${esc(src)}</b>.</p><p class="text-slate-500 text-xs">Triggers: ${xai(v).slice(0,2).map(x=>x[1].replace(/<[^>]+>/g,'')).join(' | ')}</p>
+    <div class="flex gap-2 pt-1"><button onclick="closeA();openDispatch('${v.id}','${rec(v)[0]||'Counselling'}')" class="flex-1 py-2 rounded-lg bg-red-600 text-white font-semibold">Dispatch now</button><button onclick="closeA();go('dossier','${v.id}')" class="flex-1 py-2 rounded-lg border border-slate-300 dark:border-slate-700">Open dossier</button><button onclick="closeA()" class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700">✕</button></div></div></div></div>`;lucide.createIcons()}
+
+    const closeA=()=>$('#alert').innerHTML='';
+
+/* ---------- dispatch modal ---------- */
+function openDispatch(id, type) {
+  const L = scoped();
+  const v = byId(id) || L[0];
+  const p = sc(v) >= 75 ? 'P1' : sc(v) >= 50 ? 'P2' : 'P3';
+
+  const caseOptions = L.map(x => `<option value="${x.id}" ${x.id === v.id ? 'selected' : ''}>#${x.id} · ${x.name} (${sc(x)})</option>`).join('');
+  const interventionOptions = IV.map(i => `<option ${(i.k === (type || rec(v)[0])) ? 'selected' : ''}>${i.k}</option>`).join('');
+  const priorityOptions = ['P1', 'P2', 'P3'].map(x => `<option value="${x}" ${x === p ? 'selected' : ''}>${x} · ${{ P1: 'Immediate (<1h)', P2: 'Urgent (<6h)', P3: 'Routine (<24h)' }[x]}</option>`).join('');
+
+  const fields = [
+    { label: 'Case', id: 'm-v', html: caseOptions },
+    { label: 'Intervention', id: 'm-t', html: interventionOptions },
+    { label: 'Priority', id: 'm-p', html: priorityOptions }
+  ].map(f => `
+    <label class="block text-xs text-slate-500">${f.label}
+      <select id="${f.id}" class="mt-1 w-full bg-transparent border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-800 dark:text-slate-200">
+        ${f.html.replace(/<option/g, '<option class="text-slate-900"')}
+      </select>
+    </label>
+  `).join('');
+
+  $('#modal').innerHTML = `
+    <div class="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4" onclick="if(event.target===this)closeM()">
+      <div class="sl ${CL} w-full max-w-md p-5 space-y-3">
+        <div class="flex items-center font-bold">
+          <i data-lucide="send" class="w-4 h-4 mr-2 text-red-500"></i>Dispatch Intervention
+          <button type="button" onclick="closeM()" class="ml-auto text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">✕</button>
+        </div>
+        ${fields}
+        <label class="block text-xs text-slate-500">Notes
+          <textarea id="m-n" rows="2" class="mt-1 w-full bg-transparent border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-800 dark:text-slate-200"></textarea>
+        </label>
+        <label class="flex gap-2 text-xs items-start cursor-pointer">
+          <input id="m-c" type="checkbox" class="mt-0.5" />
+          <span>I confirm lawful basis & victim consent per DPDP Act; action will be recorded in the audit trail.</span>
+        </label>
+        <button type="button" onclick="submitDispatch()" class="w-full py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-500 transition-colors">Confirm dispatch</button>
+      </div>
+    </div>`;
+
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+const closeM = () => $('#modal').innerHTML = '';
+
+function submitDispatch() {
+  if (!$('#m-c').checked) return toast('Consent confirmation required', 'warn');
+  const id = $('#m-v').value,
+    k = $('#m-t').value,
+    pend = k === 'Financial Compensation' && ['district', 'counsellor'].includes(S.role);
+  log(id, k + ($('#m-n').value ? ` — ${esc($('#m-n').value.slice(0, 40))}` : ''), $('#m-p').value, pend ? 'Pending approval' : 'Dispatched');
+  closeM();
+  toast(pend ? `${k} sent for State approval` : `${k} dispatched for case #${id}`, pend ? 'warn' : 'ok');
+  if (S.tab === 'dispatch') render();
+}
+
+/* ---------- shell ---------- */
+const TABS = [
+  ['overview', 'layout-dashboard', 'Command Center'],
+  ['queue', 'list-filter', 'High-Risk Queue'],
+  ['dossier', 'user-round-search', 'Victim Dossier'],
+  ['dispatch', 'send', 'Dispatch & Audit'],
+  ['sim', 'flask-conical', 'AI Simulator']
+];
+
+function updBadge() {
+  const n = scoped().filter(v => sc(v) >= 75).length;
+  const b = $('#badge');
+  if (b) b.textContent = n;
+  $('#scope').textContent = ROLES[S.role] + ' · ' + scoped().length + ' cases';
+}
+
+function go(t, id) {
+  if (id) S.sel = id;
+  S.tab = t;
+  render();
+}
+
+function render() {
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+  stopCall();
+  ensureSel();
+  $('#nav').innerHTML = TABS.map(t => `<button onclick="go('${t[0]}')" class="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm whitespace-nowrap text-left ${S.tab === t[0] ? 'bg-navy-800 text-white dark:bg-sky-600 font-semibold' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}"><i data-lucide="${t[1]}" class="w-4 h-4"></i>${t[2]}${t[0] === 'queue' ? '<span id="badge" class="ml-auto text-[10px] font-bold px-1.5 rounded-full bg-red-600 text-white"></span>' : ''}</button>`).join('');
+  $('#main').innerHTML = views[S.tab]();
+  updBadge();
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  if (after[S.tab]) after[S.tab]();
+}
+
+setInterval(() => {
+  if (S.tab !== 'queue' || !$('#qlist')) return;
+  const v = scoped()[Math.floor(Math.random() * scoped().length)];
+  v.nlp = clamp(v.nlp + (Math.random() * 6 - 3));
+  v.voice = clamp(v.voice + (Math.random() * 4 - 2));
+  upd(v);
+  $('#qlist').innerHTML = qlist();
+  updBadge();
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}, 5000);
+
+render();
+</script>
+</body>
+</html>
